@@ -1,0 +1,105 @@
+[
+  {
+    "logId": "p3_1763417144963",
+    "processId": "p3",
+    "processName": "p3",
+    "startTime": 1763417134435,
+    "endTime": 1763417144962,
+    "duration": 10527,
+    "status": "crashed",
+    "exitCode": 1,
+    "output": [
+      "Hello, World! 3 - 0.0s\r\n",
+      "Hello, World! 3 - 5.0s\r\n",
+      "Hello, World! 3 - 10.0s\r\nERROR: Simulando crash del proceso!",
+      "\r\n",
+      "ERROR: Traceback (most recent call last):\r\n",
+      "ERROR:   File \"C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\codigo3.py\", line 11, in <module>\r\n    raise Exception(\"Crash intencional despu�s de 10 segundos\")\r\nException: Crash intencional despu�s de 10 segundos\r\n"
+    ],
+    "pid": 10152
+  },
+  {
+    "logId": "p3_1763417665306",
+    "processId": "p3",
+    "processName": "p3",
+    "startTime": 1763417648315,
+    "endTime": 1763417665306,
+    "duration": 16991,
+    "status": "stopped",
+    "exitCode": 1,
+    "output": [
+      "Hello, World! 3 - 0.0s\r\n",
+      "Hello, World! 3 - 5.0s\r\n",
+      "Hello, World! 3 - 10.0s\r\nERROR: Simulando crash del proceso!",
+      "\r\n",
+      "ERROR: Traceback (most recent call last):\r\n",
+      "ERROR:   File \"C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\codigo3.py\", line 11, in <module>\r\n    raise Exception(\"Crash intencional despu�s de 10 segundos\")\r\nException: Crash intencional despu�s de 10 segundos\r\n",
+      "Hello, World! 2\r\n",
+      "Hello, World! 2\r\n"
+    ],
+    "pid": 11128
+  },
+  {
+    "logId": "p3_1763417858332",
+    "processId": "p3",
+    "processName": "p3",
+    "startTime": 1763417847765,
+    "endTime": 1763417858331,
+    "duration": 10566,
+    "status": "crashed",
+    "exitCode": 1,
+    "output": [
+      "Hello, World! 3 - 0.0s\r\n",
+      "Hello, World! 3 - 5.0s\r\n",
+      "Hello, World! 3 - 10.0s\r\nERROR: Simulando crash del proceso!",
+      "\r\n",
+      "ERROR: Traceback (most recent call last):\r\n",
+      "ERROR:   File \"C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\codigo3.py\", line 11, in <module>\r\n    raise Exception(\"Crash intencional despu�s de 10 segundos\")\r\nException: Crash intencional despu�s de 10 segundos\r\n"
+    ],
+    "pid": 3216
+  },
+  {
+    "logId": "p3_1763418395871",
+    "processId": "p3",
+    "processName": "p3",
+    "startTime": 1763418385175,
+    "endTime": 1763418395870,
+    "duration": 10695,
+    "status": "completed",
+    "exitCode": 0,
+    "output": [
+      "Hello, World! 3 - 0.0s\r\n",
+      "Hello, World! 3 - 5.0s\r\n",
+      "Hello, World! 3 - 10.0s\r\nERROR: Simulando crash del proceso!",
+      "\r\n",
+      "ERROR: Traceback (most recent call last):\r\n",
+      "ERROR:   File \"C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\codigo3.py\", line 11, in <module>\r\n    raise Exception(\"Crash intencional despu�s de 10 segundos\")\r\nException: Crash intencional despu�s de 10 segundos\r\n",
+      "Executing with error handling...",
+      "\n"
+    ],
+    "pid": 18764
+  },
+  {
+    "logId": "p3_1763418643895",
+    "processId": "p3",
+    "processName": "p3",
+    "startTime": 1763418626321,
+    "endTime": 1763418643895,
+    "duration": 17574,
+    "status": "stopped",
+    "exitCode": 1,
+    "output": [
+      "Hello, World! 3 - 0.0s\r\n",
+      "Hello, World! 3 - 5.0s\r\n",
+      "Hello, World! 3 - 10.0s\r\nERROR: Simulando crash del proceso!",
+      "\r\n",
+      "ERROR: Traceback (most recent call last):\r\n",
+      "ERROR:   File \"C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\codigo3.py\", line 11, in <module>\r\n    raise Exception(\"Crash intencional despu�s de 10 segundos\")\r\nException: Crash intencional despu�s de 10 segundos\r\n",
+      "Error detected",
+      "\n",
+      "Hello, World! 3 - 0.0s\r\n",
+      "Hello, World! 3 - 5.0s\r\n"
+    ],
+    "pid": 6524
+  }
+]

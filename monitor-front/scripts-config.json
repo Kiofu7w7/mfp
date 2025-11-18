@@ -1,0 +1,31 @@
+{
+  "scripts": [
+    {
+      "id": "prueba",
+      "name": "PRUEBA",
+      "description": "esto es una prueba",
+      "type": "shell",
+      "shell": "powershell",
+      "script": "cd C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\prueba; python -u -u pruebas.py hola mundo",
+      "cwd": "."
+    },
+    {
+      "id": "p2",
+      "name": "p2",
+      "description": "p2",
+      "type": "shell",
+      "shell": "powershell",
+      "script": "python -u -W ignore C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor\\codigo1.py",
+      "cwd": "."
+    },
+    {
+      "id": "p3",
+      "name": "p3",
+      "description": "p3",
+      "type": "shell",
+      "shell": "powershell",
+      "script": "cd C:\\Users\\plaga\\OneDrive\\viejo\\Escritorio\\monitor; python -u codigo3.py; if ($LASTEXITCODE -ne 0) { Write-Host \"Error detected\" }; python -u codigo3.py",
+      "cwd": "."
+    }
+  ]
+}
