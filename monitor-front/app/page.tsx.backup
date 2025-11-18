@@ -1,0 +1,724 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
+import ScriptBuilder from './components/ScriptBuilder';
+
+type ProcessStatus = 'idle' | 'running' | 'completed' | 'crashed' | 'stopped';
+
+interface ProcessInfo {
+  id: string;
+  name: string;
+  description: string;
+  status: ProcessStatus;
+  pid?: number;
+  startTime?: number;
+  endTime?: number;
+  exitCode?: number;
+  output: string[];
+}
+
+interface LogEntry {
+  logId: string;
+  processId: string;
+  processName: string;
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+  status: ProcessStatus;
+  exitCode?: number;
+  output: string[];
+  pid?: number;
+}
+
+interface ScriptConfig {
+  id: string;
+  name: string;
+  description: string;
+  type: 'simple' | 'shell' | 'complex';
+  command?: string;
+  script?: string;
+  args?: string[];
+  cwd?: string;
+}
+
+const API_URL = 'http://localhost:4000/api';
+const WS_URL = 'http://localhost:4000';
+
+export default function Home() {
+  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
+  const terminalRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [currentView, setCurrentView] = useState<'monitor' | 'logs'>('monitor');
+  const [selectedLogProcess, setSelectedLogProcess] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
+  const [showScriptBuilder, setShowScriptBuilder] = useState(false);
+  const [editingScript, setEditingScript] = useState<ScriptConfig | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalProcess, setTerminalProcess] = useState<string | null>(null);
+
+  // Actualizar tiempo cada segundo para duración
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Cerrar terminal con ESC
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selectedProcess) {
+          closeTerminal();
+        } else if (showLogs) {
+          closeLogsViewer();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [selectedProcess, showLogs]);
+
+  // Auto-scroll en terminales cuando hay nueva salida
+  useEffect(() => {
+    Object.keys(terminalRefs.current).forEach(id => {
+      const terminal = terminalRefs.current[id];
+      if (terminal) {
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+    });
+  }, [processes]);
+
+  // Conectar WebSocket
+  useEffect(() => {
+    const socketInstance = io(WS_URL);
+    
+    socketInstance.on('connect', () => {
+      console.log('Connected to WebSocket');
+      setError(null);
+    });
+
+    socketInstance.on('initial-state', (data: ProcessInfo[]) => {
+      setProcesses(data);
+      setLoading(false);
+    });
+
+    socketInstance.on('process-output', ({ id, data }: { id: string; data: string }) => {
+      setProcesses(prev => prev.map(p => {
+        if (p.id === id) {
+          return { ...p, output: [...p.output, data] };
+        }
+        return p;
+      }));
+    });
+
+    socketInstance.on('process-status', ({ id, status }: { id: string; status: ProcessStatus }) => {
+      setProcesses(prev => prev.map(p => {
+        if (p.id === id) {
+          return { ...p, status };
+        }
+        return p;
+      }));
+    });
+
+    socketInstance.on('disconnect', () => {
+      setError('Desconectado del servidor');
+    });
+
+    socketInstance.on('connect_error', () => {
+      setError('No se puede conectar al backend');
+      setLoading(false);
+    });
+
+    setSocket(socketInstance);
+
+    return () => {
+      socketInstance.disconnect();
+    };
+  }, []);
+
+  const handleAction = async (action: 'start' | 'stop' | 'clear', processId: string) => {
+    setActionLoading(`${action}-${processId}`);
+    try {
+      const response = await fetch(`${API_URL}/processes/${processId}/${action}`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || 'Error al ejecutar la acción');
+      }
+      if (action === 'clear') {
+        setProcesses(prev => prev.map(p => 
+          p.id === processId ? { ...p, output: [] } : p
+        ));
+      }
+    } catch (err) {
+      alert('Error al ejecutar la acción');
+    }
+    setActionLoading(null);
+  };
+
+  const openTerminal = (processId: string) => {
+    setSelectedProcess(processId);
+  };
+
+  const closeTerminal = () => {
+    setSelectedProcess(null);
+  };
+
+  const openLogsViewer = async (processId: string) => {
+    setSelectedLogProcess(processId);
+    setShowLogs(true);
+    await fetchLogs(processId);
+  };
+
+  const closeLogsViewer = () => {
+    setShowLogs(false);
+    setSelectedLogProcess(null);
+    setLogs([]);
+    setSelectedLog(null);
+  };
+
+  const fetchLogs = async (processId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/logs/${processId}`);
+      const data = await response.json();
+      setLogs(data);
+      if (data.length > 0) {
+        setSelectedLog(data[data.length - 1]); // Seleccionar el último por defecto
+      }
+    } catch (err) {
+      console.error('Error fetching logs:', err);
+    }
+  };
+
+  const handleScriptSaved = async () => {
+    // Recargar la lista de procesos
+    try {
+      const response = await fetch(`${API_URL}/processes`);
+      const data = await response.json();
+      setProcesses(data);
+    } catch (err) {
+      console.error('Error refreshing processes:', err);
+    }
+  };
+
+  const getStateColor = (status: ProcessStatus) => {
+    if (status === 'running') return 'bg-green-500';
+    if (status === 'completed') return 'bg-blue-500';
+    if (status === 'crashed') return 'bg-red-500';
+    if (status === 'stopped') return 'bg-yellow-500';
+    return 'bg-gray-500';
+  };
+
+  const getStateIcon = (status: ProcessStatus) => {
+    if (status === 'running') return '▶️';
+    if (status === 'completed') return '✅';
+    if (status === 'crashed') return '❌';
+    if (status === 'stopped') return '⏹️';
+    return '⚪';
+  };
+
+  const getStateLabel = (status: ProcessStatus) => {
+    if (status === 'running') return 'EJECUTANDO';
+    if (status === 'completed') return 'TERMINADO';
+    if (status === 'crashed') return 'CRASHEADO';
+    if (status === 'stopped') return 'DETENIDO';
+    return 'INACTIVO';
+  };
+
+  const formatDuration = (startTime?: number, endTime?: number) => {
+    if (!startTime) return '0s';
+    const end = endTime || Date.now();
+    const seconds = Math.floor((end - startTime) / 1000);
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  };
+
+  const formatTime = (timestamp?: number) => {
+    if (!timestamp) return '-';
+    return new Date(timestamp).toLocaleTimeString('es-ES');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center">
+        <div className="text-white text-2xl">Cargando...</div>
+      </div>
+    );
+  }
+
+  const selectedProcessData = processes.find(p => p.id === selectedProcess);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-8 border border-white/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2">
+                🖥️ Monitor de Procesos Python
+              </h1>
+              <p className="text-gray-300">
+                Monitoreo en tiempo real de tus scripts • Actualización automática sin recargar
+              </p>
+            </div>
+            <button
+              onClick={() => setShowScriptBuilder(true)}
+              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-medium transition-all shadow-lg hover:shadow-xl"
+            >
+              ➕ Crear Nuevo Script
+            </button>
+          </div>
+          {error && (
+            <div className="mt-4 bg-red-500/20 border border-red-500 text-red-200 px-4 py-3 rounded-lg">
+              ⚠️ {error}
+            </div>
+          )}
+        </div>
+
+        {/* Scripts Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {processes.map((process) => (
+            <div
+              key={process.id}
+              className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 hover:bg-white/15 transition-all flex flex-col"
+            >
+              {/* Script Header */}
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">{getStateIcon(process.status)}</span>
+                    <h3 className="text-xl font-semibold text-white">
+                      {process.name}
+                    </h3>
+                  </div>
+                  {process.description && (
+                    <p className="text-xs text-gray-400 mb-2">{process.description}</p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`${getStateColor(
+                        process.status
+                      )} px-3 py-1 rounded-full text-xs font-medium text-white`}
+                    >
+                      {getStateLabel(process.status)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Script Info */}
+              <div className="space-y-2 mb-4 text-sm">
+                {process.pid && (
+                  <div className="flex justify-between text-gray-300">
+                    <span>PID:</span>
+                    <span className="font-mono text-white">{process.pid}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-gray-300">
+                  <span>Inicio:</span>
+                  <span className="font-mono text-white">
+                    {formatTime(process.startTime)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-300">
+                  <span>Duración:</span>
+                  <span className="font-mono text-white">
+                    {formatDuration(process.startTime, process.endTime)}
+                  </span>
+                </div>
+                {process.exitCode !== undefined && (
+                  <div className="flex justify-between text-gray-300">
+                    <span>Exit Code:</span>
+                    <span className={`font-mono ${process.exitCode === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {process.exitCode}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Output Preview */}
+              <div className="mb-4 bg-black/50 rounded-lg p-3 border border-white/10 flex-1 min-h-[120px]">
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-xs text-gray-400">
+                    {process.output.length > 0 ? `Últimas líneas (${process.output.length} total)` : 'Sin salida'}
+                  </p>
+                  <div className="flex gap-2">
+                    {process.output.length > 0 && (
+                      <>
+                        <button
+                          onClick={() => openTerminal(process.id)}
+                          className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                        >
+                          📺 Ver Todo
+                        </button>
+                        <button
+                          onClick={() => handleAction('clear', process.id)}
+                          className="text-xs text-gray-400 hover:text-white transition-colors"
+                        >
+                          🗑️ Limpiar
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div 
+                  ref={(el) => { terminalRefs.current[process.id] = el; }}
+                  className="text-xs font-mono space-y-1 max-h-20 overflow-y-auto"
+                >
+                  {process.output.length === 0 ? (
+                    <div className="text-gray-500 italic">Esperando salida...</div>
+                  ) : (
+                    process.output.slice(-3).map((line, idx) => (
+                      <div
+                        key={idx}
+                        className={line.startsWith('ERROR') ? 'text-red-400' : 'text-green-400'}
+                      >
+                        {line.trim()}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 mt-auto mb-2">
+                <button
+                  onClick={() => handleAction('start', process.id)}
+                  disabled={
+                    process.status === 'running' ||
+                    actionLoading === `start-${process.id}`
+                  }
+                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
+                >
+                  {actionLoading === `start-${process.id}` ? '...' : '▶️ Iniciar'}
+                </button>
+                <button
+                  onClick={() => handleAction('stop', process.id)}
+                  disabled={
+                    process.status !== 'running' ||
+                    actionLoading === `stop-${process.id}`
+                  }
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
+                >
+                  {actionLoading === `stop-${process.id}` ? '...' : '⏹️ Detener'}
+                </button>
+              </div>
+
+              {/* Logs Button */}
+              <button
+                onClick={() => openLogsViewer(process.id)}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
+              >
+                📊 Ver Historial de Logs
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Modal Terminal Completa */}
+        {selectedProcess && selectedProcessData && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 rounded-2xl border border-white/20 w-full max-w-6xl max-h-[90vh] flex flex-col shadow-2xl">
+              {/* Terminal Header */}
+              <div className="bg-gradient-to-r from-gray-800 to-gray-900 px-6 py-4 border-b border-white/10 flex items-center justify-between rounded-t-2xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{getStateIcon(selectedProcessData.status)}</span>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">
+                      {selectedProcessData.name}.py
+                    </h2>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span
+                        className={`${getStateColor(
+                          selectedProcessData.status
+                        )} px-2 py-0.5 rounded text-xs font-medium text-white`}
+                      >
+                        {getStateLabel(selectedProcessData.status)}
+                      </span>
+                      {selectedProcessData.pid && (
+                        <span className="text-xs text-gray-400">PID: {selectedProcessData.pid}</span>
+                      )}
+                      <span className="text-xs text-gray-400">
+                        {formatDuration(selectedProcessData.startTime, selectedProcessData.endTime)}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {selectedProcessData.output.length} líneas
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleAction('clear', selectedProcess)}
+                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    🗑️ Limpiar
+                  </button>
+                  <button
+                    onClick={closeTerminal}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ✕ Cerrar
+                  </button>
+                </div>
+              </div>
+
+              {/* Terminal Body */}
+              <div 
+                className="flex-1 overflow-y-auto bg-black p-4 font-mono text-sm"
+                style={{ fontFamily: 'Consolas, Monaco, "Courier New", monospace' }}
+              >
+                {selectedProcessData.output.length === 0 ? (
+                  <div className="text-gray-500 italic">
+                    Terminal vacía. La salida aparecerá aquí cuando el proceso se ejecute.
+                  </div>
+                ) : (
+                  <div className="space-y-0.5">
+                    {selectedProcessData.output.map((line, idx) => (
+                      <div
+                        key={idx}
+                        className={`${
+                          line.startsWith('ERROR') 
+                            ? 'text-red-400' 
+                            : line.startsWith('PROCESS ERROR')
+                            ? 'text-red-500 font-bold'
+                            : 'text-green-400'
+                        }`}
+                      >
+                        <span className="text-gray-600 select-none">{String(idx + 1).padStart(4, ' ')} │ </span>
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Terminal Footer */}
+              <div className="bg-gray-800 px-6 py-3 border-t border-white/10 flex items-center justify-between rounded-b-2xl">
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => handleAction('start', selectedProcess)}
+                    disabled={selectedProcessData.status === 'running'}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ▶️ Iniciar
+                  </button>
+                  <button
+                    onClick={() => handleAction('stop', selectedProcess)}
+                    disabled={selectedProcessData.status !== 'running'}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ⏹️ Detener
+                  </button>
+                </div>
+                <div className="text-xs text-gray-400">
+                  Presiona ESC para cerrar
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Visor de Logs */}
+        {showLogs && selectedLogProcess && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 rounded-2xl border border-white/20 w-full max-w-7xl max-h-[90vh] flex shadow-2xl">
+              {/* Sidebar - Lista de Logs */}
+              <div className="w-80 border-r border-white/10 flex flex-col bg-gray-800/50 rounded-l-2xl">
+                <div className="p-4 border-b border-white/10">
+                  <h3 className="text-lg font-bold text-white mb-1">
+                    📊 Historial de Logs
+                  </h3>
+                  <p className="text-sm text-gray-400">{selectedLogProcess}.py</p>
+                  <p className="text-xs text-gray-500 mt-1">{logs.length} ejecuciones totales</p>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2">
+                  {logs.length === 0 ? (
+                    <div className="text-center text-gray-500 py-8 text-sm">
+                      No hay logs guardados
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {[...logs].reverse().map((log, idx) => (
+                        <button
+                          key={log.logId}
+                          onClick={() => setSelectedLog(log)}
+                          className={`w-full text-left p-3 rounded-lg transition-all ${
+                            selectedLog?.logId === log.logId
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-white/5 hover:bg-white/10 text-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold">
+                              Ejecución #{logs.length - idx}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              log.status === 'completed' ? 'bg-blue-500' :
+                              log.status === 'crashed' ? 'bg-red-500' :
+                              log.status === 'stopped' ? 'bg-yellow-500' :
+                              'bg-gray-500'
+                            }`}>
+                              {log.status === 'completed' ? '✅' :
+                               log.status === 'crashed' ? '❌' :
+                               log.status === 'stopped' ? '⏹️' : '⚪'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {new Date(log.startTime).toLocaleString('es-ES')}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Duración: {log.duration ? `${(log.duration / 1000).toFixed(1)}s` : 'N/A'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="p-4 border-t border-white/10">
+                  <button
+                    onClick={closeLogsViewer}
+                    className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ✕ Cerrar
+                  </button>
+                </div>
+              </div>
+
+              {/* Main Content - Detalles del Log */}
+              <div className="flex-1 flex flex-col">
+                {selectedLog ? (
+                  <>
+                    {/* Header del Log */}
+                    <div className="bg-gradient-to-r from-gray-800 to-gray-900 px-6 py-4 border-b border-white/10">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-xl font-bold text-white mb-2">
+                            {selectedLog.processName}.py
+                          </h2>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className={`${
+                              selectedLog.status === 'completed' ? 'bg-blue-500' :
+                              selectedLog.status === 'crashed' ? 'bg-red-500' :
+                              selectedLog.status === 'stopped' ? 'bg-yellow-500' :
+                              'bg-gray-500'
+                            } px-3 py-1 rounded text-white font-medium`}>
+                              {selectedLog.status === 'completed' ? '✅ COMPLETADO' :
+                               selectedLog.status === 'crashed' ? '❌ CRASHEADO' :
+                               selectedLog.status === 'stopped' ? '⏹️ DETENIDO MANUALMENTE' :
+                               '⚪ DESCONOCIDO'}
+                            </span>
+                            {selectedLog.pid && (
+                              <span className="text-gray-400">PID: {selectedLog.pid}</span>
+                            )}
+                            {selectedLog.exitCode !== undefined && (
+                              <span className={`${
+                                selectedLog.exitCode === 0 ? 'text-green-400' : 'text-red-400'
+                              } font-mono`}>
+                                Exit Code: {selectedLog.exitCode}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Información del Log */}
+                    <div className="bg-gray-800/30 px-6 py-4 border-b border-white/10">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <p className="text-gray-400 mb-1">Fecha de Inicio</p>
+                          <p className="text-white font-mono">
+                            {new Date(selectedLog.startTime).toLocaleDateString('es-ES')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 mb-1">Hora de Inicio</p>
+                          <p className="text-white font-mono">
+                            {new Date(selectedLog.startTime).toLocaleTimeString('es-ES')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 mb-1">Hora de Fin</p>
+                          <p className="text-white font-mono">
+                            {selectedLog.endTime 
+                              ? new Date(selectedLog.endTime).toLocaleTimeString('es-ES')
+                              : 'N/A'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 mb-1">Duración Total</p>
+                          <p className="text-white font-mono">
+                            {selectedLog.duration 
+                              ? `${(selectedLog.duration / 1000).toFixed(2)}s`
+                              : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 text-sm">
+                        <p className="text-gray-400 mb-1">Total de Líneas de Salida</p>
+                        <p className="text-white font-mono">{selectedLog.output.length} líneas</p>
+                      </div>
+                    </div>
+
+                    {/* Salida del Log */}
+                    <div className="flex-1 overflow-y-auto bg-black p-4 font-mono text-sm">
+                      {selectedLog.output.length === 0 ? (
+                        <div className="text-gray-500 italic">
+                          No se capturó ninguna salida durante esta ejecución.
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {selectedLog.output.map((line, idx) => (
+                            <div
+                              key={idx}
+                              className={`${
+                                line.startsWith('ERROR') 
+                                  ? 'text-red-400' 
+                                  : line.startsWith('PROCESS ERROR')
+                                  ? 'text-red-500 font-bold'
+                                  : 'text-green-400'
+                              }`}
+                            >
+                              <span className="text-gray-600 select-none">
+                                {String(idx + 1).padStart(4, ' ')} │ 
+                              </span>
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-gray-500">
+                    Selecciona un log de la lista para ver los detalles
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Script Builder Modal */}
+        {showScriptBuilder && (
+          <ScriptBuilder
+            onSave={handleScriptSaved}
+            onClose={() => setShowScriptBuilder(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
